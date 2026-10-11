@@ -18,9 +18,11 @@ The controller must receive one HID Feature Report ("priming") before it accepts
 volatile vendor writes; this also lights the ring white, so it is done lazily on the
 first command rather than at startup (which would re-light the ring after boot).
 
-Requires usbfs access to 17ef:a017 or 17ef:a024 (see the bundled udev rule) and pyusb.
-Some Hub 500 units enumerate the same USB Audio + HID iface 5 composite as a024
-(#1); the module tries both product IDs.
+Requires usbfs + hidraw access to 17ef:a017 or 17ef:a024 (see the bundled udev
+rule) and pyusb. Some Hub 500 units enumerate the same USB Audio + HID iface 5
+composite as a024 (#1); the module tries both product IDs. HID priming needs
+writable /dev/hidraw* for iface 5 — without it, vendor writes are accepted by
+pyusb but the ring does not change.
 """
 import logging
 import threading
@@ -181,4 +183,7 @@ class Addon:
             finally:
                 os.close(fd)
         except OSError as err:
-            logger.debug("LED: HID priming skipped (%s)", err)
+            logger.warning(
+                "LED: HID priming failed (%s) — check hidraw udev access for 17ef:a017/a024",
+                err,
+            )
