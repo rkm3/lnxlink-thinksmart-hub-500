@@ -18,7 +18,9 @@ The controller must receive one HID Feature Report ("priming") before it accepts
 volatile vendor writes; this also lights the ring white, so it is done lazily on the
 first command rather than at startup (which would re-light the ring after boot).
 
-Requires usbfs access to 17ef:a017 (see the bundled udev rule) and pyusb.
+Requires usbfs access to 17ef:a017 or 17ef:a024 (see the bundled udev rule) and pyusb.
+Some Hub 500 units enumerate the same USB Audio + HID iface 5 composite as a024
+(#1); the module tries both product IDs.
 """
 import logging
 import threading
@@ -33,7 +35,9 @@ LED_COLORS = ["white", "green", "red"]
 class Addon:
     """LED ring addon."""
 
-    VID, PID = 0x17EF, 0xA017
+    VID = 0x17EF
+    # a017 is the ID reverse-engineered upstream; a024 seen on another Hub 500 (#1).
+    PIDS = (0xA017, 0xA024)
     R_FE96, R_FEF7, R_FEF8, R_FEF9, R_FEFA, R_FEEE, R_FEEF = (
         0xFE96, 0xFEF7, 0xFEF8, 0xFEF9, 0xFEFA, 0xFEEE, 0xFEEF)
     MOTOR_BIT, DONE_BIT = 0x08, 0x40
@@ -61,9 +65,16 @@ class Addon:
         if import_install_package("pyusb", ">=1.2.1", "usb") is None:
             raise SystemError("pyusb is required for the LED module")
         import usb.core  # the helper returns the top-level package, so import the submodule
-        self.dev = usb.core.find(idVendor=self.VID, idProduct=self.PID)
+        self.dev = None
+        self.pid = None
+        for pid in self.PIDS:
+            self.dev = usb.core.find(idVendor=self.VID, idProduct=pid)
+            if self.dev is not None:
+                self.pid = pid
+                break
         if self.dev is None:
-            raise SystemError("LED device 17ef:a017 not found")
+            ids = ", ".join(f"17ef:{pid:04x}" for pid in self.PIDS)
+            raise SystemError(f"LED device not found (tried {ids})")
         # Do NOT prime or drive here: that would re-light the ring after boot.
 
     def exposed_controls(self):
@@ -140,7 +151,7 @@ class Addon:
                 uevent = open(os.path.join(entry, "device", "uevent")).read().upper()
             except OSError:
                 continue
-            if f"{self.VID:04X}" not in uevent or f"{self.PID:04X}" not in uevent:
+            if f"{self.VID:04X}" not in uevent or f"{self.pid:04X}" not in uevent:
                 continue
             real = os.path.realpath(os.path.join(entry, "device"))
             usb_if = os.path.basename(os.path.dirname(real))
